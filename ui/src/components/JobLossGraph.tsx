@@ -21,8 +21,6 @@ function clamp01(x: number) {
   return Math.max(0, Math.min(1, x));
 }
 
-// EMA smoothing that works on a per-series list.
-// alpha=1 -> no smoothing, alpha closer to 0 -> more smoothing.
 function emaSmoothPoints(points: { step: number; value: number }[], alpha: number) {
   if (points.length === 0) return [];
   const a = clamp01(alpha);
@@ -50,21 +48,20 @@ function hashToIndex(str: string, mod: number) {
 }
 
 const PALETTE = [
-  'rgba(96,165,250,1)', // blue-400
-  'rgba(52,211,153,1)', // emerald-400
-  'rgba(167,139,250,1)', // purple-400
-  'rgba(251,191,36,1)', // amber-400
-  'rgba(244,114,182,1)', // pink-400
-  'rgba(248,113,113,1)', // red-400
-  'rgba(34,211,238,1)', // cyan-400
-  'rgba(129,140,248,1)', // indigo-400
+  'rgba(96,165,250,1)',
+  'rgba(52,211,153,1)',
+  'rgba(167,139,250,1)',
+  'rgba(251,191,36,1)',
+  'rgba(244,114,182,1)',
+  'rgba(248,113,113,1)',
+  'rgba(34,211,238,1)',
+  'rgba(129,140,248,1)',
 ];
 
 function strokeForKey(key: string) {
   return PALETTE[hashToIndex(key, PALETTE.length)];
 }
 
-// Returns a solid but duller/darker version of an rgba color string for the trend overlay.
 function dulledColor(rgba: string): string {
   const m = rgba.match(/rgba?\((\d+),(\d+),(\d+)/);
   if (!m) return 'rgba(120,120,120,1)';
@@ -77,34 +74,21 @@ function dulledColor(rgba: string): string {
 export default function JobLossGraph({ job }: Props) {
   const { series, lossKeys, status, refreshLoss } = useJobLossLog(job.id, 2000);
 
-  // Controls
   const [useLogScale, setUseLogScale] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [showSmoothed, setShowSmoothed] = useState(true);
-
-  // 0..100 slider. 100 = no smoothing, 0 = heavy smoothing.
   const [smoothing, setSmoothing] = useState(80);
-
-  // UI-only downsample for rendering speed
   const [plotStride, setPlotStride] = useState(1);
-
-  // show only last N points in the chart (0 = all)
-  const [windowSize] = useState<number>(0);
-
-  // quick y clipping for readability
+  const [windowSize, setWindowSize] = useState<number>(0);
   const [clipOutliers, setClipOutliers] = useState(false);
-
-  // which loss series are enabled (default: all enabled)
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
 
-  // keep enabled map in sync with discovered keys (enable new ones automatically)
   useEffect(() => {
     setEnabled(prev => {
       const next = { ...prev };
       for (const k of lossKeys) {
         if (next[k] === undefined) next[k] = true;
       }
-      // drop removed keys
       for (const k of Object.keys(next)) {
         if (!lossKeys.includes(k)) delete next[k];
       }
@@ -114,29 +98,21 @@ export default function JobLossGraph({ job }: Props) {
 
   const activeKeys = useMemo(() => lossKeys.filter(k => enabled[k] !== false), [lossKeys, enabled]);
 
-  // Zoom state for drag-to-zoom
   const [zoomLeft, setZoomLeft] = useState<number | null>(null);
   const [zoomRight, setZoomRight] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  // Selection tracked entirely in refs to avoid re-renders during drag
   const selectStartLabel = useRef<number | null>(null);
   const selectStartPx = useRef<number | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const chartWrapperRef = useRef<HTMLDivElement>(null);
 
   const perSeries = useMemo(() => {
-    // Build per-series processed point arrays (raw + smoothed + fullSmooth), then merge by step for charting.
     const stride = Math.max(1, plotStride | 0);
-
-    // smoothing%: 0 => no smoothing (alpha=1.0), 100 => heavy smoothing (alpha=0.02)
     const t = clamp01(smoothing / 100);
-    const alpha = 1.0 - t * 0.98; // 1.0 -> 0.02
-
-    // Full smoothing overlay: always max smoothing (alpha=0.02)
+    const alpha = 1.0 - t * 0.98;
     const fullAlpha = 0.005;
 
-    const out: Record<string, { raw: { step: number; value: number }[]; smooth: { step: number; value: number }[]; fullSmooth: { step: number; value: number }[] }> =
-      {};
+    const out: Record<string, { raw: { step: number; value: number }[]; smooth: { step: number; value: number }[]; fullSmooth: { step: number; value: number }[] }> = {};
 
     for (const key of activeKeys) {
       const pts: LossPoint[] = series[key] ?? [];
@@ -147,7 +123,6 @@ export default function JobLossGraph({ job }: Props) {
         .filter(p => (useLogScale ? p.value > 0 : true))
         .filter((_, idx) => idx % stride === 0);
 
-      // windowing (applies after stride)
       if (windowSize > 0 && raw.length > windowSize) {
         raw = raw.slice(raw.length - windowSize);
       }
@@ -162,8 +137,6 @@ export default function JobLossGraph({ job }: Props) {
   }, [series, activeKeys, smoothing, plotStride, windowSize, useLogScale]);
 
   const chartData = useMemo(() => {
-    // Merge series into one array of objects keyed by step.
-    // Fields: `${key}__raw` and `${key}__smooth`
     const map = new Map<number, any>();
 
     for (const key of activeKeys) {
@@ -192,7 +165,6 @@ export default function JobLossGraph({ job }: Props) {
     return arr;
   }, [activeKeys, perSeries]);
 
-  // Zoomed slice of chartData
   const visibleData = useMemo(() => {
     if (zoomLeft == null || zoomRight == null) return chartData;
     const lo = Math.min(zoomLeft, zoomRight);
@@ -200,12 +172,10 @@ export default function JobLossGraph({ job }: Props) {
     return chartData.filter(d => d.step >= lo && d.step <= hi);
   }, [chartData, zoomLeft, zoomRight]);
 
-  // Convert a pixel x within the wrapper to a fractional position [0,1] across the plot area
   const pxToFraction = useCallback((clientX: number) => {
     const wrapper = chartWrapperRef.current;
     if (!wrapper) return 0;
     const rect = wrapper.getBoundingClientRect();
-    // chart margin left (8) + yAxis width (72) = 80, margin right = 16
     const plotLeft = 80;
     const plotRight = rect.width - 16;
     const plotWidth = plotRight - plotLeft;
@@ -220,7 +190,6 @@ export default function JobLossGraph({ job }: Props) {
     return data[Math.max(0, Math.min(data.length - 1, idx))].step;
   }, [visibleData]);
 
-  // Native DOM events for drag selection
   useEffect(() => {
     const wrapper = chartWrapperRef.current;
     if (!wrapper) return;
@@ -239,7 +208,6 @@ export default function JobLossGraph({ job }: Props) {
       const plotRight = rect.width - 16;
       const startLocal = selectStartPx.current - rect.left;
       const curLocal = e.clientX - rect.left;
-      // Clamp to plot area
       const clampedStart = Math.max(plotLeft, Math.min(plotRight, startLocal));
       const clampedCur = Math.max(plotLeft, Math.min(plotRight, curLocal));
       const left = Math.min(clampedStart, clampedCur);
@@ -286,7 +254,6 @@ export default function JobLossGraph({ job }: Props) {
   const yDomain = useMemo((): [number | 'auto', number | 'auto'] => {
     if (!clipOutliers || chartData.length < 10) return ['auto', 'auto'];
 
-    // Collect visible values (prefer smoothed if shown, else raw)
     const vals: number[] = [];
     for (const row of chartData) {
       for (const key of activeKeys) {
@@ -310,13 +277,13 @@ export default function JobLossGraph({ job }: Props) {
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="h-2 w-2 rounded-full bg-blue-400" />
-          <h2 className="text-gray-100 text-sm font-medium">Loss graph</h2>
+          <h2 className="text-gray-100 text-sm font-medium">损失图</h2>
           <span className="text-xs text-gray-400">
-            {status === 'loading' && 'Loading...'}
-            {status === 'refreshing' && 'Refreshing...'}
-            {status === 'error' && 'Error'}
-            {status === 'success' && hasData && `${chartData.length.toLocaleString()} steps`}
-            {status === 'success' && !hasData && 'No data yet'}
+            {status === 'loading' && '加载中...'}
+            {status === 'refreshing' && '刷新中...'}
+            {status === 'error' && '错误'}
+            {status === 'success' && hasData && `${chartData.length.toLocaleString()} 步`}
+            {status === 'success' && !hasData && '暂无数据'}
           </span>
         </div>
 
@@ -325,124 +292,116 @@ export default function JobLossGraph({ job }: Props) {
           onClick={refreshLoss}
           className="px-3 py-1 rounded-md text-xs bg-gray-700/60 hover:bg-gray-700 text-gray-200 border border-gray-700"
         >
-          Refresh
+          刷新
         </button>
       </div>
 
       {/* Chart */}
-      <div className="px-4  pt-4 pb-4">
+      <div className="px-4 pt-4 pb-4">
         <div ref={chartWrapperRef} className="bg-gray-950 rounded-lg border border-gray-800 h-96 relative select-none">
-          {/* Drag selection overlay — positioned via refs, no re-renders */}
           <div
             ref={overlayRef}
             style={{ display: 'none', position: 'absolute', top: 10, bottom: 10, pointerEvents: 'none', background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)', zIndex: 5 }}
           />
           {!hasData ? (
             <div className="h-full w-full flex items-center justify-center text-sm text-gray-400">
-              {status === 'error' ? 'Failed to load loss logs.' : 'Waiting for loss points...'}
+              {status === 'error' ? '加载损失日志失败。' : '等待损失数据点...'}
             </div>
           ) : (
             <>
-            {isZoomed && (
-              <button
-                type="button"
-                onClick={handleResetZoom}
-                className="absolute top-2 right-2 z-10 px-2 py-1 rounded text-xs bg-blue-600/80 hover:bg-blue-600 text-white border border-blue-500/50"
-              >
-                Reset zoom
-              </button>
-            )}
-            <ResponsiveContainer width="100%" height="100%" style={isDragging ? { pointerEvents: 'none' } : undefined}>
-              <LineChart
-                data={visibleData}
-                margin={{ top: 10, right: 16, bottom: 10, left: 8 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                <XAxis
-                  dataKey="step"
-                  tick={{ fill: 'rgba(255,255,255,0.55)', fontSize: 12 }}
-                  tickLine={{ stroke: 'rgba(255,255,255,0.15)' }}
-                  axisLine={{ stroke: 'rgba(255,255,255,0.15)' }}
-                  minTickGap={40}
-                />
-                <YAxis
-                  scale={useLogScale ? 'log' : 'linear'}
-                  tick={{ fill: 'rgba(255,255,255,0.55)', fontSize: 12 }}
-                  tickLine={{ stroke: 'rgba(255,255,255,0.15)' }}
-                  axisLine={{ stroke: 'rgba(255,255,255,0.15)' }}
-                  width={72}
-                  tickFormatter={formatNum}
-                  domain={yDomain}
-                  allowDataOverflow={clipOutliers}
-                />
-                {!isDragging && (
-                  <Tooltip
-                    cursor={{ stroke: 'rgba(59,130,246,0.25)', strokeWidth: 1 }}
-                    contentStyle={{
-                      background: 'rgba(17,24,39,0.96)',
-                      border: '1px solid rgba(31,41,55,1)',
-                      borderRadius: 10,
-                      color: 'rgba(255,255,255,0.9)',
+              {isZoomed && (
+                <button
+                  type="button"
+                  onClick={handleResetZoom}
+                  className="absolute top-2 right-2 z-10 px-2 py-1 rounded text-xs bg-blue-600/80 hover:bg-blue-600 text-white border border-blue-500/50"
+                >
+                  重置缩放
+                </button>
+              )}
+              <ResponsiveContainer width="100%" height="100%" style={isDragging ? { pointerEvents: 'none' } : undefined}>
+                <LineChart data={visibleData} margin={{ top: 10, right: 16, bottom: 10, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis
+                    dataKey="step"
+                    tick={{ fill: 'rgba(255,255,255,0.55)', fontSize: 12 }}
+                    tickLine={{ stroke: 'rgba(255,255,255,0.15)' }}
+                    axisLine={{ stroke: 'rgba(255,255,255,0.15)' }}
+                    minTickGap={40}
+                  />
+                  <YAxis
+                    scale={useLogScale ? 'log' : 'linear'}
+                    tick={{ fill: 'rgba(255,255,255,0.55)', fontSize: 12 }}
+                    tickLine={{ stroke: 'rgba(255,255,255,0.15)' }}
+                    axisLine={{ stroke: 'rgba(255,255,255,0.15)' }}
+                    width={72}
+                    tickFormatter={formatNum}
+                    domain={yDomain}
+                    allowDataOverflow={clipOutliers}
+                  />
+                  {!isDragging && (
+                    <Tooltip
+                      cursor={{ stroke: 'rgba(59,130,246,0.25)', strokeWidth: 1 }}
+                      contentStyle={{
+                        background: 'rgba(17,24,39,0.96)',
+                        border: '1px solid rgba(31,41,55,1)',
+                        borderRadius: 10,
+                        color: 'rgba(255,255,255,0.9)',
+                        fontSize: 12,
+                      }}
+                      labelStyle={{ color: 'rgba(255,255,255,0.75)' }}
+                      labelFormatter={(label: any) => `步 ${label}`}
+                      formatter={(value: any, name: any) => [formatNum(Number(value)), name]}
+                    />
+                  )}
+
+                  <Legend
+                    wrapperStyle={{
+                      paddingTop: 8,
+                      color: 'rgba(255,255,255,0.7)',
                       fontSize: 12,
                     }}
-                    labelStyle={{ color: 'rgba(255,255,255,0.75)' }}
-                    labelFormatter={(label: any) => `step ${label}`}
-                    formatter={(value: any, name: any) => [formatNum(Number(value)), name]}
                   />
-                )}
 
-                <Legend
-                  wrapperStyle={{
-                    paddingTop: 8,
-                    color: 'rgba(255,255,255,0.7)',
-                    fontSize: 12,
-                  }}
-                />
-
-                {/* Raw lines */}
-                {showRaw && activeKeys.map(k => (
-                  <Line
-                    key={`${k}__raw`}
-                    type="monotone"
-                    dataKey={`${k}__raw`}
-                    name={`${k} (raw)`}
-                    stroke={strokeForKey(k).replace('1)', '0.40)')}
-                    strokeWidth={1.25}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                ))}
-                {/* Smoothed lines */}
-                {showSmoothed && activeKeys.map(k => (
-                  <Line
-                    key={`${k}__smooth`}
-                    type="monotone"
-                    dataKey={`${k}__smooth`}
-                    name={`${k}`}
-                    stroke={strokeForKey(k)}
-                    strokeWidth={2}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                ))}
-                {/* Full-smooth trend overlay — rendered last so it's on top, hidden from legend/tooltip */}
-                {activeKeys.map(k => (
-                  <Line
-                    key={`${k}__fullsmooth`}
-                    type="monotone"
-                    dataKey={`${k}__fullsmooth`}
-                    name={`${k}__fullsmooth`}
-                    stroke={dulledColor(strokeForKey(k))}
-                    strokeWidth={2.5}
-                    dot={false}
-                    isAnimationActive={false}
-                    legendType="none"
-                    tooltipType="none"
-                  />
-                ))}
-
-              </LineChart>
-            </ResponsiveContainer>
+                  {showRaw && activeKeys.map(k => (
+                    <Line
+                      key={`${k}__raw`}
+                      type="monotone"
+                      dataKey={`${k}__raw`}
+                      name={`${k} (raw)`}
+                      stroke={strokeForKey(k).replace('1)', '0.40)')}
+                      strokeWidth={1.25}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                  {showSmoothed && activeKeys.map(k => (
+                    <Line
+                      key={`${k}__smooth`}
+                      type="monotone"
+                      dataKey={`${k}__smooth`}
+                      name={`${k}`}
+                      stroke={strokeForKey(k)}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                  {activeKeys.map(k => (
+                    <Line
+                      key={`${k}__fullsmooth`}
+                      type="monotone"
+                      dataKey={`${k}__fullsmooth`}
+                      name={`${k}__fullsmooth`}
+                      stroke={dulledColor(strokeForKey(k))}
+                      strokeWidth={2.5}
+                      dot={false}
+                      isAnimationActive={false}
+                      legendType="none"
+                      tooltipType="none"
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
             </>
           )}
         </div>
@@ -452,19 +411,19 @@ export default function JobLossGraph({ job }: Props) {
       <div className="px-4 pb-2">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
-            <label className="block text-xs text-gray-400 mb-2">Display</label>
+            <label className="block text-xs text-gray-400 mb-2">显示</label>
             <div className="flex flex-wrap gap-2">
-              <ToggleButton checked={showSmoothed} onClick={() => setShowSmoothed(v => !v)} label="Smoothed" />
-              <ToggleButton checked={showRaw} onClick={() => setShowRaw(v => !v)} label="Raw" />
-              <ToggleButton checked={useLogScale} onClick={() => setUseLogScale(v => !v)} label="Log Y" />
-              <ToggleButton checked={clipOutliers} onClick={() => setClipOutliers(v => !v)} label="Clip outliers" />
+              <ToggleButton checked={showSmoothed} onClick={() => setShowSmoothed(v => !v)} label="平滑" />
+              <ToggleButton checked={showRaw} onClick={() => setShowRaw(v => !v)} label="原始" />
+              <ToggleButton checked={useLogScale} onClick={() => setUseLogScale(v => !v)} label="对数 Y 轴" />
+              <ToggleButton checked={clipOutliers} onClick={() => setClipOutliers(v => !v)} label="裁剪异常值" />
             </div>
           </div>
 
           <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
-            <label className="block text-xs text-gray-400 mb-2">Series</label>
+            <label className="block text-xs text-gray-400 mb-2">系列</label>
             {lossKeys.length === 0 ? (
-              <div className="text-sm text-gray-400">No loss keys found yet.</div>
+              <div className="text-sm text-gray-400">尚未找到损失系列。</div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {lossKeys.map(k => (
@@ -491,7 +450,7 @@ export default function JobLossGraph({ job }: Props) {
 
           <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs text-gray-400">Smoothing</label>
+              <label className="block text-xs text-gray-400">平滑度</label>
               <span className="text-xs text-gray-300">{smoothing}%</span>
             </div>
             <input
@@ -507,8 +466,8 @@ export default function JobLossGraph({ job }: Props) {
 
           <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs text-gray-400">Plot stride</label>
-              <span className="text-xs text-gray-300">every {plotStride} pt</span>
+              <label className="block text-xs text-gray-400">绘图步长</label>
+              <span className="text-xs text-gray-300">每 {plotStride} 点</span>
             </div>
             <input
               type="range"
@@ -518,9 +477,27 @@ export default function JobLossGraph({ job }: Props) {
               onChange={e => setPlotStride(Number(e.target.value))}
               className="w-full accent-blue-500"
             />
-            <div className="mt-2 text-[11px] text-gray-500">UI downsample for huge runs.</div>
+            <div className="mt-2 text-[11px] text-gray-500">界面降采样，用于处理超长运行。</div>
           </div>
 
+          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 md:col-span-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-gray-400">窗口（最后 N 点）</label>
+              <span className="text-xs text-gray-300">{windowSize === 0 ? '全部' : windowSize.toLocaleString()}</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={20000}
+              step={250}
+              value={windowSize}
+              onChange={e => setWindowSize(Number(e.target.value))}
+              className="w-full accent-blue-500"
+            />
+            <div className="mt-2 text-[11px] text-gray-500">
+              设为 0 显示全部（对于非常长的运行不建议）。
+            </div>
+          </div>
         </div>
       </div>
     </div>
