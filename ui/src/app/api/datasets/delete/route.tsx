@@ -16,9 +16,11 @@ export async function POST(request: Request) {
     }
 
     // delete it and return success
+    // fs.rmdirSync(datasetPath, { recursive: true }) 
+    // fs.rmdirSync 的 recursive 选项被标记为 Deprecated（弃用）https://nodejs.org/api/deprecations.html，改为fs.rmSync如下
     fs.rmSync(datasetPath, { recursive: true, force: true });
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete dataset' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create dataset' }, { status: 500 });
   }
 }
