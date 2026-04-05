@@ -14,20 +14,18 @@ export const dynamic = 'force-dynamic';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Ostris - AI Toolkit',
-  description: 'A toolkit for building AI things.',
+  title: 'Ostris - AI 工具包',
+  description: '一个用于构建 AI 应用的工具包。',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Check if the AI_TOOLKIT_AUTH environment variable is set
   const authRequired = process.env.AI_TOOLKIT_AUTH ? true : false;
-
   const platform = os.platform();
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="zh" suppressHydrationWarning>
       <head>
-        <meta name="apple-mobile-web-app-title" content="AI-Toolkit" />
+        <meta name="apple-mobile-web-app-title" content="AI 工具包" />
         <script
           dangerouslySetInnerHTML={{
             __html: `
