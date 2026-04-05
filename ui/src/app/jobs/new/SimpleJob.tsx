@@ -159,7 +159,7 @@ export default function SimpleJob({
           <div className="absolute inset-0 z-50 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-400 border-t-blue-500" />
-              <span className="text-sm text-gray-400">Loading...</span>
+              <span className="text-sm text-gray-400">加载中...</span>
             </div>
           </div>
         )}
